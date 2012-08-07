@@ -7,8 +7,11 @@
         level = 0, 
         %% Store binded variables
         variables = [], 
+        %% Store case arguments
+        case_arguments = [], 
         %% Store a list with numbers of levels on which new scope is created.
-        scope_levels = []
+        scope_levels = [],
+        scope_level_types = []
        }).
 
 
@@ -18,15 +21,16 @@ flatten_expressions(Node) ->
     %% "Pattern = Body"
     Pattern = erl_syntax:match_expr_pattern(Node),
     Body    = erl_syntax:match_expr_body(Node),
+    flatten_expressions(Pattern, Body).
+
+
+flatten_expressions(Pattern, Body) ->
     case erl_syntax:type(Body) of
         match_expr -> 
             [Pattern|flatten_expressions(Body)];
         _ -> 
             [Pattern, Body]
     end.
-
-
-
 
     
 %% @doc Return a HOF, which can repeat a path to elem, marked with MF.
@@ -127,14 +131,13 @@ bindings_to_variables(Bindings, Level) ->
 
 
 %% @doc Return a list of a lists of matched valiables.
--spec record_expression_bindings_list(MatchExNode) -> Res when
-    MatchExNode :: Node,
+-spec record_expression_bindings_list(Nodes) -> Res when
+    Nodes :: [Node],
     Res :: [[Node|false]],
     Node :: erl_syntax:syntaxTree().
 
-record_expression_bindings_list(MatchExNode) ->
+record_expression_bindings_list(Nodes) ->
     %% get a list of HOFs to retrieve record_expr nodes
-    Nodes = flatten_expressions(MatchExNode),
     IsMatched = fun is_record_expr/1,
     PathFuns = get_all_record_expr_paths(Nodes, IsMatched, [], []),
     [[valid_node(PathFun, Node) || Node <- Nodes]
@@ -189,9 +192,14 @@ parse_transform(Forms, _Options) ->
     X.
 
 %% @doc Mark this level as a level, that creates a scope.
-add_scope_level(Acc=#state{scope_levels = Lvls, level = Lvl}) ->
-    Acc#state{scope_levels = [Lvl|Lvls]}.
+add_scope_level(Type, Acc=#state{scope_levels = Lvls, level = Lvl, 
+                                 scope_level_types = Types}) ->
+    Acc#state{scope_levels = [Lvl|Lvls], scope_level_types = [Type|Types]}.
 
+add_case_argument(Node, Acc=#state{level = Lvl, case_arguments = CaseArgs}) ->
+    Argument = erl_syntax:case_expr_argument(Node),
+    CaseArg = #var{value = Argument, level = Lvl},
+    Acc#state{case_arguments = [CaseArg|CaseArgs]}.
 
 %% @doc This function will be passed to `mapfoldl' of the AST.
 visitor(level_up, Acc=#state{level = Lvl}) ->
@@ -200,14 +208,17 @@ visitor(level_up, Acc=#state{level = Lvl}) ->
 
 %% This level is a new scope.
 visitor(level_down, Acc=#state{level = Lvl, scope_levels = [Lvl|Lvls], 
-                               variables = Vars}) ->
+                               scope_level_types = [_|ScopeLevelTypes],
+                               variables = Vars, case_arguments = CaseArgs}) ->
 %   io:format(user, " ~B down and clean\t~p~2n", [Lvl, Vars]),
     %% Decrease the scope number;
     %% Delete the current level from scope numbers;
     %% Delete binded variables on this level.
     IsOnCurrentLvlOrHigher = fun(#var{level = VarLvl}) -> VarLvl >= Lvl end,
-    Vars2 = lists:dropwhile(IsOnCurrentLvlOrHigher, Vars),
-    Acc#state{level = Lvl - 1, scope_levels = Lvls, variables = Vars2};
+    Vars2     = lists:dropwhile(IsOnCurrentLvlOrHigher, Vars),
+    CaseArgs2 = lists:dropwhile(IsOnCurrentLvlOrHigher, CaseArgs),
+    Acc#state{level = Lvl - 1, scope_levels = Lvls, variables = Vars2,
+              case_arguments = CaseArgs2, scope_level_types = ScopeLevelTypes};
 
 %% This level is not a new scope.
 visitor(level_down, Acc=#state{level = Lvl}) ->
@@ -217,17 +228,42 @@ visitor(level_down, Acc=#state{level = Lvl}) ->
 visitor(Node, Acc=#state{variables = Vars, level = Lvl}) ->
 %   io:format(user, ":\t~p\n", [Node]),
     Old = {Node, Acc},
-    case erl_syntax:type(Node) of
+    NodeType = erl_syntax:type(Node),
+    case NodeType of
     fun_expr ->
-        {Node, add_scope_level(Acc)};
+        {Node, add_scope_level(NodeType, Acc)};
     funtion  ->
-        {Node, add_scope_level(Acc)};
+        {Node, add_scope_level(NodeType, Acc)};
     list_comp ->
-        {Node, add_scope_level(Acc)};
+        {Node, add_scope_level(NodeType, Acc)};
+    case_expr ->
+            {Node, add_case_argument(Node, add_scope_level(NodeType, Acc))};
+    clause ->
+            #state{ case_arguments = CaseArgs, 
+                   scope_level_types = ScopeLevelTypes } = Acc,
+            case ScopeLevelTypes of
+            [case_expr|_] ->
+                [#var{value = Argument}] = CaseArgs,
+                %% The clause is a case clause.
+                [Pattern] = erl_syntax:clause_patterns(Node),
+%               io:format(user, "*: ~p ~p~n", [Argument, Pattern]),
+                %% Handle a case argument and a pattern as a match expression.
+                Nodes = flatten_expressions(Argument, Pattern),
+                Bindings = record_expression_bindings_list(Nodes),
+                NewVars = bindings_list_to_variables(Bindings, Lvl),
+                %% Here is a trick: use the case_expr node type for
+                %% simplify the pattern matching.
+                Acc1 = add_scope_level(case_expr, Acc),
+                {Node, Acc1#state{variables = NewVars ++ Vars}};
+            _ -> 
+                %% It is an if or fun clause
+                {Node, add_scope_level(clause, Acc)}
+            end;
 
     match_expr -> 
         %% Bind variables.
-        Bindings = record_expression_bindings_list(Node),
+        Nodes = flatten_expressions(Node),
+        Bindings = record_expression_bindings_list(Nodes),
 %       io:format(user, "|:\t~p~n", [Bindings]),
         NewVars = bindings_list_to_variables(Bindings, Lvl),
         {Node, Acc#state{variables = NewVars ++ Vars}};
@@ -254,7 +290,8 @@ visitor(Node, Acc=#state{variables = Vars, level = Lvl}) ->
             Old
         end;
 
-    _X -> %% Not interesting type.
+    X -> %% Not interesting type.
+%           io:format(user, "!:\t~p\t~p~n", [X, Node]),
         Old
     end.
 

@@ -48,6 +48,21 @@ difficult_match2(X = Y = #rec{}) ->
 difficult_match3([X|_] = [#rec{}|_]) ->
     X.f1.
 
+few_clauses(X = #rec{}) -> X.f1;
+few_clauses(X = #rec1{}) -> X.f2.
+
+case_case(X) ->
+    case X of
+        #rec{}  -> X.f1;
+        #rec1{} -> X.f1
+    end.
+
+case_case2(X) ->
+    case X of
+        Y = #rec{}  -> Y.f1;
+        Z = #rec1{} -> Z.f1
+    end.
+
 wtf(#rec1{} = #rec{}) -> ok.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -73,5 +88,10 @@ difficult_match_test_() ->
     [ ?_assertEqual(difficult_match(#rec{}), 1) 
     , ?_assertEqual(difficult_match2(#rec{}), 1) 
     , ?_assertEqual(difficult_match3([#rec{}]), 1) ].
+
+case_case_test_() ->
+    [ ?_assertEqual(case_case(#rec{}), 1) 
+    , ?_assertEqual(case_case(#rec1{}), 3) 
+    ].
 
 -endif.
