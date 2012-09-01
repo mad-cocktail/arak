@@ -7,9 +7,9 @@ It is a tiny parse transform.
 
 **Author**: Uvarov Michael (freeakk@gmail.com)
 
-.. image:: https://secure.travis-ci.org/freeakk/arak.png?branch=master
+.. image:: https://secure.travis-ci.org/mad-cocktail/arak.png?branch=master
     :alt: Build Status
-    :target: http://travis-ci.org/freeakk/arak
+    :target: http://travis-ci.org/mad-cocktail/arak
 
 Allows to use a short access syntax (dot-syntax) for getting values from
 records.
