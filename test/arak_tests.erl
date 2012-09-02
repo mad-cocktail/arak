@@ -14,6 +14,7 @@ direct_access_before(X = #rec{}) ->
     X#rec.f1.
 
 direct_access_nested(X = #rec{}) ->
+    %% X shadowed.
     fun(X = #rec1{}) ->
             X.f1
         end.
