@@ -33,7 +33,7 @@ node_type(Node) ->
     erl_syntax:type(Node).
 
 
-%% @doc Copy positional information from `From' to `To'.       
+%% @doc Copy positional information from `From' node to `To' node.       
 -spec copy_pos(From, To) -> To when                            
     From :: erl_syntax:syntaxTree(),                           
     To :: From.                                                
@@ -44,10 +44,10 @@ copy_pos(From, To) ->
 
 
 %% @doc Form a list of explessions from a Tree.
+%%
+%% Example:
 %% Tree: E1 = E2 = E3 = E4;
 %% List: [E1, E2, E3, E4].
-%%
-%% 
 flatten_expressions(Node) ->
     %% "Pattern = Body"
     match_expr = node_type(Node),
@@ -85,7 +85,7 @@ find_path(MF, St, Node) ->
         undefined
     end.
 
-
+%% @doc Add a path token on recursion return stage.
 push_decision(Decision, {Decisions, State}) -> 
     {[Decision|Decisions], State}.
 
