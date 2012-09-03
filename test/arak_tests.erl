@@ -49,6 +49,12 @@ difficult_match2(X = Y = #rec{}) ->
 difficult_match3([X|_] = [#rec{}|_]) ->
     X.f1.
 
+difficult_match4([_, X|_] = [_, #rec{}|_]) ->
+    X.f1.
+
+difficult_match5({_, X} = {_, #rec{}}) ->
+    X.f1.
+
 few_clauses(X = #rec{}) -> X.f1;
 few_clauses(X = #rec1{}) -> X.f2.
 
@@ -88,7 +94,10 @@ leave_scope_test_() ->
 difficult_match_test_() ->
     [ ?_assertEqual(difficult_match(#rec{}), 1) 
     , ?_assertEqual(difficult_match2(#rec{}), 1) 
-    , ?_assertEqual(difficult_match3([#rec{}]), 1) ].
+    , ?_assertEqual(difficult_match3([#rec{}]), 1)
+    , ?_assertEqual(difficult_match4([skip, #rec{}]), 1) 
+    , ?_assertEqual(difficult_match5({skip, #rec{}}), 1) 
+    ].
 
 case_case_test_() ->
     [ ?_assertEqual(case_case(#rec{}), 1) 

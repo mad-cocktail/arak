@@ -14,6 +14,7 @@
         scope_level_types = []
        }).
 
+-type path_tokens() :: [fun() | head | tail].
 
 parse_transform(Forms, _Options) ->
     F = fun visitor/2,
@@ -72,51 +73,21 @@ flatten_expressions(Pattern, Body) ->
 %% the tree Node, marked with MF.
 %% MF is a match function.
 %% Returns `undefined', if MF returns `false' for all nodes of the tree.
--spec find_path(MF, State, Node) -> {State, PathFun} | undefined when
+-spec find_path(MF, State, Node) -> {PathTokens, State} | undefined when
     MF :: fun((Node, State) -> matched | State),
     State :: term(),
-    PathFun :: fun((Node) -> Node).
+    PathTokens :: path_tokens(). 
 
 find_path(MF, St, Node) ->
     try
-        PathF = path(MF, St, Node),
-        retrieve_state(PathF, Node)
+        path(MF, St, Node)
     catch throw:not_found ->
         undefined
     end.
 
 
-%% @doc Returns the id function.
-none() ->
-    fun(Node) -> Node end.
-
-%% @doc Eval F1 and pass its result to F2.
-two(F1, F2) ->
-    fun(Node) -> F2(F1(Node)) end.
-
-tail([_|T]) -> T.
-head([H|_]) -> H.
-
-
-list(_MF, _St, []) ->
-    throw(not_found);
-list(MF, St, [H|T]) ->
-    try
-        two(fun head/1, path(MF, St, H))
-    catch throw:not_found ->
-        two(fun tail/1, list(MF, St, T))
-    end.
-
-
-%% @doc Add a wrapper around a `PathFun'.
-%% Last function returns `{State, MatchedNode}'.
-pass_state(St, F) -> fun(Node) -> {St, F(Node)} end.
-
-%% @doc Retrieve the state and hide it.
-retrieve_state(F, TreeNode) -> 
-    {St, _MatchedNode} = F(TreeNode),
-    %% We cannot rebuild the path fun, so lets just wrap it.
-    {St, fun(Node) -> {_, Match} = F(Node), Match end}.
+push_decision(Decision, {Decisions, State}) -> 
+    {[Decision|Decisions], State}.
 
 
 %% @doc Retrieve a node path.
@@ -124,15 +95,15 @@ retrieve_state(F, TreeNode) ->
 %%
 %% @see find_path/2
 %% @private
--spec path(MatchFunction, State, Node) -> PathFun when
+-spec path(MatchFunction, State, Node) -> {PathTokens, State} when
     MatchFunction :: fun(),
     State :: term(),
     Node :: erl_syntax:syntaxTree(),
-    PathFun :: fun().
+    PathTokens :: path_tokens().
 
 path(MF, St, Node) ->
     case MF(Node, St) of
-        matched -> pass_state(St, none());
+        matched -> {[], St};
         %% Not matched, get the new state.
         St2 ->
             %% Gen a next node, save path.
@@ -141,26 +112,61 @@ path(MF, St, Node) ->
                     HeadF = fun erl_syntax:list_head/1,
                     TailF = fun erl_syntax:list_tail/1,
                     try 
-                        two(HeadF, path(MF, St2, HeadF(Node)))
+                        push_decision(HeadF, path(MF, St2, HeadF(Node)))
                     catch throw:not_found ->
                         Tail = TailF(Node),
                         case node_type(Tail) of
                             nil  -> throw(not_found);
-                            _    -> two(TailF, path(MF, St2, Tail))
+                            _    -> push_decision(TailF, path(MF, St2, Tail))
                         end
                     end;
                 parentheses ->
                     ParentF = fun erl_syntax:parentheses_body/1,
-                    two(ParentF, path(MF, St2, ParentF(Node)));
+                    push_decision(ParentF, path(MF, St2, ParentF(Node)));
 %               record ->
                 tuple ->
                     ElemsF = fun erl_syntax:tuple_elements/1,
-                    two(ElemsF, list(MF, St2, ElemsF(Node)));
+                    push_decision(ElemsF, list(MF, St2, ElemsF(Node)));
                 _ ->
                     throw(not_found)
             end
     end.
 
+
+list(_MF, _St, NodeList) ->
+    list_cycle(_MF, _St, NodeList, 1).
+
+%% Find the position of the matched element.
+list_cycle(_MF, _St, [], _Pos) ->
+    throw(not_found);
+list_cycle(MF, St, [H|T], Pos) ->
+    try
+        push_decision({list_element, Pos}, path(MF, St, H))
+    catch throw:not_found ->
+        list_cycle(MF, St, T, Pos+1)
+    end.
+
+
+%% ===============================================================
+%% Apply path
+%% ===============================================================
+
+%% @doc Return a sub-node of `Node' using a saved path.
+-spec apply_path(PathTokens, Node) -> Node when
+    PathTokens :: path_tokens(),
+    Node :: erl_syntax:syntaxTree().
+apply_path(PathTokens, Node) ->
+    lists:foldl(fun next_node/2, Node, PathTokens).
+
+
+next_node({list_element, Pos}, List) ->
+    lists:nth(Pos, List);
+%% `Decision' is a function, for example, fun erl_syntax:list_head/1.
+next_node(Decision, Node) ->
+    Decision(Node).
+
+
+head([H|_]) -> H.
 
 %% ===============================================================
 %% Variable bindings
@@ -200,29 +206,36 @@ bindings_to_variables(Bindings, Level) ->
 %% @doc Return a list of a lists of matched valiables.
 -spec record_expression_bindings_list(Nodes) -> Res when
     Nodes :: [Node],
-    Res :: [[Node|false]],
+    Res :: [[Node|undefined]],
     Node :: erl_syntax:syntaxTree().
 
 record_expression_bindings_list(Nodes) ->
-    %% get a list of HOFs to retrieve record_expr nodes
     IsMatched = fun is_record_expr/1,
-    PathFuns = get_all_record_expr_paths(Nodes, IsMatched, [], []),
-    [[valid_node(PathFun, Node) || Node <- Nodes]
-                                || PathFun <- PathFuns].
+    %% Get a list of paths of record_expr nodes.
+    Paths = match_all_nodes(Nodes, IsMatched),
+    %% Get paths.
+    [[apply_path(Path, Node) || Node <- Nodes]
+                             || Path <- Paths].
     
-valid_node(PathFun, Node) ->
-    try
-        PathFun(Node)
-    catch _:_ ->
-        false
-    end.
-
 is_record_expr(Node) ->
     node_type(Node) =:= record_expr.
 
-get_all_record_expr_paths([], _IsMatched, _PrevStates, PathFs) ->
-    lists:reverse(PathFs);
-get_all_record_expr_paths([H|T], IsMatched, PrevStates, PathFs) ->
+
+%% @doc Return all sub-nodes of nodes from the list `Nodes', for those 
+%%      `IsMatched' returns `true'.
+-spec match_all_nodes(Nodes, IsMatched) -> [PathTokens] when
+    Nodes :: [Node],
+    Node :: erl_syntax:syntaxTree(),
+    IsMatched :: fun((Node) -> boolean()),
+    PathTokens :: path_tokens().
+
+match_all_nodes(Nodes, IsMatched) ->
+    match_all_nodes(Nodes, IsMatched, [], []).
+
+
+match_all_nodes([], _IsMatched, _PrevStates, Paths) ->
+    lists:reverse(Paths);
+match_all_nodes([H|T], IsMatched, PrevStates, Paths) ->
     MF = fun(Node, State) -> 
             case IsMatched(Node) of
                 true -> 
@@ -237,11 +250,11 @@ get_all_record_expr_paths([H|T], IsMatched, PrevStates, PathFs) ->
     %% Use an integer (counter) as a state. The initial value is 0.
     case find_path(MF, 0, H) of
         undefined ->
-            get_all_record_expr_paths(T, IsMatched, PrevStates, PathFs);
-        {NewState, PathF} ->
+            match_all_nodes(T, IsMatched, PrevStates, Paths);
+        {Path, NewState} ->
             %% Restart for the current node
-            get_all_record_expr_paths([H|T], IsMatched, [NewState|PrevStates],
-                                      [PathF|PathFs])
+            match_all_nodes([H|T], IsMatched, [NewState|PrevStates],
+                            [Path|Paths])
     end.
 
 
@@ -255,6 +268,8 @@ add_scope_level(Type, Acc=#state{scope_levels = Lvls, level = Lvl,
                                  scope_level_types = Types}) ->
     Acc#state{scope_levels = [Lvl|Lvls], scope_level_types = [Type|Types]}.
 
+
+%% @doc Mark this level as a level, that holds clauses of the case `Node'.
 add_case_argument(Node, Acc=#state{level = Lvl, case_arguments = CaseArgs}) ->
     Argument = erl_syntax:case_expr_argument(Node),
     CaseArg = #var{value = Argument, level = Lvl},
