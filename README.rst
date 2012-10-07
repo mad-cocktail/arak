@@ -97,10 +97,8 @@ We can get mnemosyne-like fields combining this parse transform with QLC.
     -include_lib("stdlib/include/qlc.hrl").
 
     revision_ids(RepId, undefined, Hashes) when RepId =/= undefined ->
-        Q = qlc:q([R || R=#g_revision{commit_hash = RevHash, branch = RevBr}
-                             <- mnesia:table(g_revision),
-                        B=#g_branch{}
-                             <- mnesia:table(g_branch),
+        Q = qlc:q([R || R=#g_revision{} <- mnesia:table(g_revision),
+                        B=#g_branch{}   <- mnesia:table(g_branch),
                         Hash <- Hashes,
                         B.id  =:= R.branch,
                         Hash  =:= R.commit_hash,
