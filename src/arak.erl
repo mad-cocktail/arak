@@ -166,7 +166,6 @@ next_node(Decision, Node) ->
     Decision(Node).
 
 
-head([H|_]) -> H.
 
 %% ===============================================================
 %% Variable bindings
@@ -193,7 +192,7 @@ bindings_to_variables(Bindings, Level) ->
     RecNodes = [RecNode || {record_expr, RecNode} <- TypesNodes],
     VarNodes = [VarNode || {variable,    VarNode} <- TypesNodes],
     %% If #rec{} = #rec1{}, the error will be here!
-    RecNode = head(RecNodes),
+    RecNode = had(RecNodes),
     [error_logger:info_msg("These records newer matches: ~p~n", 
                           [RecNodes]) || length(RecNodes) > 1],
     RecNameTree = erl_syntax:record_expr_type(RecNode),
