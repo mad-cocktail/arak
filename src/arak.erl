@@ -329,7 +329,7 @@ visitor(Node, Acc=#state{variables = Vars, level = Lvl}) ->
                    scope_level_types = ScopeLevelTypes } = Acc,
             case ScopeLevelTypes of
             [case_expr|_] ->
-                [#var{value = Argument}] = CaseArgs,
+                [#var{value = Argument}|_ParentCases] = CaseArgs,
                 %% The clause is a case clause.
                 [Pattern] = erl_syntax:clause_patterns(Node),
 %               io:format(user, "*: ~p ~p~n", [Argument, Pattern]),

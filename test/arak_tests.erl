@@ -79,6 +79,16 @@ case_bug(L) ->
         [#rec1{f1 = F1}] -> F1
     end.
 
+case_bug2(Rec) ->
+    %% Get something before this date.
+    case [Rec] of
+        List ->
+            case hd(List) of
+                #rec1{f1 = F1} -> F1
+            end
+    end.
+
+
 
 -include_lib("eunit/include/eunit.hrl").
 
