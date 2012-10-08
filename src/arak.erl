@@ -220,7 +220,7 @@ try_apply_path_for_nodes(Path, [Node|Nodes]) ->
     try 
         [apply_path(Path, Node)|try_apply_path_for_nodes(Path, Nodes)]
     catch error:Reason ->
-        error_logger:info_msg("Maybe error: ~p", [Reason]),
+        error_logger:info_msg("Maybe error: ~p~n", [Reason]),
         try_apply_path_for_nodes(Path, Nodes)
     end;
 
