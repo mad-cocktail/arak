@@ -192,7 +192,7 @@ bindings_to_variables(Bindings, Level) ->
     RecNodes = [RecNode || {record_expr, RecNode} <- TypesNodes],
     VarNodes = [VarNode || {variable,    VarNode} <- TypesNodes],
     %% If #rec{} = #rec1{}, the error will be here!
-    RecNode = had(RecNodes),
+    RecNode = hd(RecNodes),
     [error_logger:info_msg("These records newer matches: ~p~n", 
                           [RecNodes]) || length(RecNodes) > 1],
     RecNameTree = erl_syntax:record_expr_type(RecNode),
@@ -213,9 +213,21 @@ record_expression_bindings_list(Nodes) ->
     %% Get a list of paths of record_expr nodes.
     Paths = match_all_nodes(Nodes, IsMatched),
     %% Get paths.
-    [[apply_path(Path, Node) || Node <- Nodes]
-                             || Path <- Paths].
+    [try_apply_path_for_nodes(Path, Nodes) || Path <- Paths].
     
+%% @doc It is a helper for previous function.
+try_apply_path_for_nodes(Path, [Node|Nodes]) ->
+    try 
+        [apply_path(Path, Node)|try_apply_path_for_nodes(Path, Nodes)]
+    catch error:Reason ->
+        error_logger:info_msg("Maybe error: ~p", [Reason]),
+        try_apply_path_for_nodes(Path, Nodes)
+    end;
+
+try_apply_path_for_nodes(_Path, []) ->
+    [].
+
+
 is_record_expr(Node) ->
     node_type(Node) =:= record_expr.
 

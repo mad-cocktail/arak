@@ -72,6 +72,14 @@ case_case2(X) ->
 
 wtf(#rec1{} = #rec{}) -> ok.
 
+
+case_bug(L) ->
+    case L of
+        %% Matched by key (it is rare case).
+        [#rec1{f1 = F1}] -> F1
+    end.
+
+
 -include_lib("eunit/include/eunit.hrl").
 
 -ifdef(TEST).
